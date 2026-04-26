@@ -1,0 +1,142 @@
+<!DOCTYPE html><html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I3Pack Full Extractor PRO</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+body{font-family:Arial;padding:20px;background:#111;color:#eee}
+button{margin-top:10px;padding:10px}
+</style>
+</head>
+<body><h2>?? I3Pack Extractor PRO (Anti Corrupt + Multi Type)</h2>
+<input type="file" id="fileInput" accept=".i3pack" />
+<button id="dumpAll" disabled>Dump All (Pro)</button>
+<pre id="log"></pre><script>
+let rawBytes;
+let filesMap = [];
+
+function log(msg){
+ document.getElementById('log').textContent += msg + "\n";
+}
+
+function safeSlice(start,end){
+ if(start<0) start=0;
+ if(end>rawBytes.length) end=rawBytes.length;
+ return rawBytes.subarray(start,end);
+}
+
+function detectType(offset){
+ let b = rawBytes;
+
+ // I3S
+ if(b[offset]===0x49 && b[offset+1]===0x9A) return {ext:"i3s",name:"I3S"};
+
+ // DDS
+ if(b[offset]===0x44 && b[offset+1]===0x44 && b[offset+2]===0x53) return {ext:"dds",name:"Texture DDS"};
+
+ // OGG
+ if(b[offset]===0x4F && b[offset+1]===0x67 && b[offset+2]===0x67) return {ext:"ogg",name:"Audio OGG"};
+
+ // WAV
+ if(b[offset]===0x52 && b[offset+1]===0x49 && b[offset+2]===0x46 && b[offset+3]===0x46) return {ext:"wav",name:"Audio WAV"};
+
+ // I3I
+ if(b[offset]===0x49 && b[offset+1]===0x33 && b[offset+2]===0x49) return {ext:"i3i",name:"Image I3I"};
+
+ return null;
+}
+
+function findNext(offset){
+ for(let i=offset+4;i<rawBytes.length-4;i++){
+  if(detectType(i)) return i;
+ }
+ return rawBytes.length;
+}
+
+function isValid(data,type){
+ if(data.length<32) return false;
+
+ if(type.ext==="i3s"){
+  return data[0]===0x49 && data[1]===0x9A;
+ }
+
+ if(type.ext==="dds"){
+  return data[0]===0x44 && data[1]===0x44;
+ }
+
+ if(type.ext==="ogg"){
+  return data[0]===0x4F;
+ }
+
+ if(type.ext==="wav"){
+  return data[0]===0x52;
+ }
+
+ return true;
+}
+
+function scan(){
+ filesMap=[];
+ let id=0;
+
+ for(let i=0;i<rawBytes.length-4;i++){
+  let type = detectType(i);
+
+  if(type){
+   let next = findNext(i);
+   let data = safeSlice(i,next);
+
+   if(!isValid(data,type)) continue;
+
+   filesMap.push({
+    id:id++,
+    offset:i,
+    size:data.length,
+    type:type
+   });
+
+   log(`${type.name} ditemukan di ${i} size ${data.length}`);
+   i = next-1;
+  }
+ }
+
+ log("TOTAL FILE: "+filesMap.length);
+ document.getElementById('dumpAll').disabled=false;
+}
+
+
+document.getElementById('fileInput').addEventListener('change',e=>{
+ const file=e.target.files[0];
+ const reader=new FileReader();
+ reader.onload=ev=>{
+  rawBytes=new Uint8Array(ev.target.result);
+  log("Scanning...");
+  scan();
+ };
+ reader.readAsArrayBuffer(file);
+});
+
+
+document.getElementById('dumpAll').onclick=async()=>{
+ const zip=new JSZip();
+
+ filesMap.forEach(f=>{
+  let data=safeSlice(f.offset,f.offset+f.size);
+
+  if(!isValid(data,f.type)){
+   log("Skip corrupt: "+f.id);
+   return;
+  }
+
+  zip.file(`${f.type.name}/file_${f.id}.${f.type.ext}`,data);
+ });
+
+ const blob=await zip.generateAsync({type:"blob"});
+ const a=document.createElement('a');
+ a.href=URL.createObjectURL(blob);
+ a.download="i3pack_pro_dump.zip";
+ a.click();
+};
+</script></body>
+</html>
