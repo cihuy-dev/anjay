@@ -1,0 +1,114 @@
+<!DOCTYPE html><html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cihuy tool FIX</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+body { font-family: Arial; padding:20px; }
+</style>
+</head>
+<body><h2>I3Pack Extractor (Anti Corrupt)</h2>
+<input type="file" id="fileInput" accept=".i3pack" />
+<button id="dumpAll" disabled>Dump All</button>
+<pre id="log"></pre><script>
+let rawBytes, filesMap = [];
+
+function log(msg){
+ document.getElementById('log').textContent += msg + "\n";
+}
+
+function isValidI3S(data){
+ if(data.length < 16) return false;
+ return (data[0] === 0x49 && data[1] === 0x9A);
+}
+
+function safeSlice(start, end){
+ if(end > rawBytes.length) end = rawBytes.length;
+ if(start < 0) start = 0;
+ return rawBytes.subarray(start, end);
+}
+
+function findNextValidOffset(current){
+ for(let i=current+1;i<rawBytes.length-4;i++){
+  if(rawBytes[i] === 0x49 && rawBytes[i+1] === 0x9A){
+    return i;
+  }
+ }
+ return rawBytes.length;
+}
+
+document.getElementById('fileInput').addEventListener('change', e=>{
+ const file = e.target.files[0];
+ const reader = new FileReader();
+ reader.onload = ev=>{
+  rawBytes = new Uint8Array(ev.target.result);
+  scan();
+ };
+ reader.readAsArrayBuffer(file);
+});
+
+function scan(){
+ filesMap = [];
+ let id = 0;
+
+ for(let i=0;i<rawBytes.length-4;i++){
+  if(rawBytes[i] === 0x49 && rawBytes[i+1] === 0x9A){
+    let next = findNextValidOffset(i);
+    let data = safeSlice(i, next);
+
+    // VALIDASI tambahan
+    if(!isValidI3S(data)) continue;
+
+    // Hindari file kepotong terlalu kecil
+    if(data.length < 100) continue;
+
+    filesMap.push({ id:id++, offset:i, size:data.length });
+
+    log("I3S found at " + i + " size " + data.length);
+    i = next - 1;
+  }
+ }
+
+ log("Total I3S: " + filesMap.length);
+ document.getElementById('dumpAll').disabled = false;
+}
+
+function downloadFile(file){
+ let data = safeSlice(file.offset, file.offset + file.size);
+
+ // FIX: jangan hapus header sembarangan
+ if(!isValidI3S(data)){
+  log("Skip corrupt file " + file.id);
+  return;
+ }
+
+ const blob = new Blob([data]);
+ const a = document.createElement('a');
+ a.href = URL.createObjectURL(blob);
+ a.download = "file_" + file.id + ".i3s";
+ a.click();
+}
+
+document.getElementById('dumpAll').onclick = async ()=>{
+ const zip = new JSZip();
+
+ filesMap.forEach(f=>{
+  let data = safeSlice(f.offset, f.offset + f.size);
+
+  // VALIDASI sebelum masuk ZIP
+  if(isValidI3S(data)){
+    zip.file("file_"+f.id+".i3s", data);
+  } else {
+    log("Skip corrupt: " + f.id);
+  }
+ });
+
+ const blob = await zip.generateAsync({type:"blob"});
+ const a = document.createElement('a');
+ a.href = URL.createObjectURL(blob);
+ a.download = "fixed_dump.zip";
+ a.click();
+};
+</script></body>
+</html>
