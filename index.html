@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>I3Pack GOD Extractor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+body{font-family:Arial;background:#0d1117;color:#e6edf3;padding:20px}
+button{margin-top:10px;padding:10px}
+</style>
+</head>
+<body><h2>? I3Pack GOD Extractor (Rebuild + Repair)</h2>
+<input type="file" id="fileInput" accept=".i3pack" />
+<button id="dumpAll" disabled>Dump GOD Mode</button>
+<pre id="log"></pre><script>
+let rawBytes;
+let filesMap=[];
+
+function log(msg){
+ document.getElementById('log').textContent += msg+"\n";
+}
+
+function safeSlice(s,e){
+ if(s<0)s=0;
+ if(e>rawBytes.length)e=rawBytes.length;
+ return rawBytes.subarray(s,e);
+}
+
+function detect(offset){
+ let b=rawBytes;
+
+ if(b[offset]===0x49 && b[offset+1]===0x9A) return {ext:"i3s",name:"I3S"};
+ if(b[offset]===0x44 && b[offset+1]===0x44 && b[offset+2]===0x53) return {ext:"dds",name:"DDS"};
+ if(b[offset]===0x4F && b[offset+1]===0x67) return {ext:"ogg",name:"OGG"};
+ if(b[offset]===0x52 && b[offset+1]===0x49) return {ext:"wav",name:"WAV"};
+ if(b[offset]===0x49 && b[offset+1]===0x33 && b[offset+2]===0x49) return {ext:"i3i",name:"I3I"};
+
+ return null;
+}
+
+function findNext(offset){
+ for(let i=offset+4;i<rawBytes.length-4;i++){
+  if(detect(i)) return i;
+ }
+ return rawBytes.length;
+}
+
+function repairI3S(data){
+ // repair sederhana header jika rusak
+ if(data[0]!==0x49 || data[1]!==0x9A){
+  let fixed=new Uint8Array(data.length);
+  fixed.set(data);
+  fixed[0]=0x49;
+  fixed[1]=0x9A;
+  return fixed;
+ }
+ return data;
+}
+
+function rebuildPadding(data){
+ // align ke 16 byte biar engine aman
+ let pad = 16 - (data.length % 16);
+ if(pad===16) return data;
+ let out=new Uint8Array(data.length+pad);
+ out.set(data);
+ return out;
+}
+
+function scan(){
+ filesMap=[];
+ let id=0;
+
+ for(let i=0;i<rawBytes.length-4;i++){
+  let t=detect(i);
+  if(t){
+   let next=findNext(i);
+   let data=safeSlice(i,next);
+
+   if(data.length<32) continue;
+
+   filesMap.push({id:id++,offset:i,size:data.length,type:t});
+   log(`${t.name} @${i} size ${data.length}`);
+   i=next-1;
+  }
+ }
+
+ log("TOTAL: "+filesMap.length);
+ document.getElementById('dumpAll').disabled=false;
+}
+
+
+document.getElementById('fileInput').addEventListener('change',e=>{
+ let file=e.target.files[0];
+ let r=new FileReader();
+ r.onload=ev=>{
+  rawBytes=new Uint8Array(ev.target.result);
+  log("Scanning GOD mode...");
+  scan();
+ };
+ r.readAsArrayBuffer(file);
+});
+
+
+document.getElementById('dumpAll').onclick=async()=>{
+ const zip=new JSZip();
+
+ filesMap.forEach(f=>{
+  let data=safeSlice(f.offset,f.offset+f.size);
+
+  // repair khusus i3s
+  if(f.type.ext==="i3s"){
+   data=repairI3S(data);
+  }
+
+  // rebuild padding
+  data=rebuildPadding(data);
+
+  zip.file(`${f.type.name}/file_${f.id}.${f.type.ext}`,data);
+ });
+
+ const blob=await zip.generateAsync({type:"blob"});
+ const a=document.createElement('a');
+ a.href=URL.createObjectURL(blob);
+ a.download="GOD_i3pack_dump.zip";
+ a.click();
+};
+</script></body>
+</html>
